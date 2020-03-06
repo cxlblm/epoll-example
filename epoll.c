@@ -64,13 +64,9 @@ int init_epoll(int sfd, struct epoll_event *event)
     return epoll_fd;
 }
 
-int init_events(struct epoll_event **events)
+struct epoll_event *init_events()
 {
-    *events = calloc(EVENTS_NUM, sizeof(struct epoll_event));
-    if (NULL == *events) {
-        return -1;
-    }
-    return 0;
+    return (struct epoll_event *) calloc(EVENTS_NUM, sizeof(struct epoll_event));
 }
 
 int socket_accept(int socket, int epoll_fd, struct epoll_event *event)
@@ -106,13 +102,13 @@ int socket_accept(int socket, int epoll_fd, struct epoll_event *event)
 ssize_t read_conn(int conn, char *buffer, size_t size)
 {
     ssize_t count;
-    count = read(conn, buffer, size);
+    count = read(conn, (void *)buffer, size);
     if (count < 0) {
         if (errno != EAGAIN) {
             // 需要文件句柄, 否则就会出错
-            return 0;
+            return -1;
         }
-        return count;
+        return 0;
     }
     return count;
 }
@@ -122,12 +118,8 @@ void write_screen(int epoll_fd, struct epoll_event *event)
     char buffer[256];
     size_t buffer_size = 256;
     while (1) {
-        ssize_t count = read_conn(event->data.fd, (void *)&buffer, buffer_size);
+        ssize_t count = read_conn(event->data.fd, &buffer, buffer_size);
         if (count < 0) {
-            if (errno == EAGAIN) {
-                perror("conn read EAGAIN ");
-                break;
-            }
             perror("conn read error ");
             int r = epoll_ctl(epoll_fd, EPOLL_CTL_DEL, event->data.fd, event);
             if (r < 0) {
@@ -136,6 +128,9 @@ void write_screen(int epoll_fd, struct epoll_event *event)
             }
             close(event->data.fd);
             // 还需要关闭数据
+            break;
+        } else if (count == 0) {
+            perror("conn read EAGAIN");
             break;
         }
         int r = write(1, buffer, count);
@@ -146,11 +141,16 @@ void write_screen(int epoll_fd, struct epoll_event *event)
     }
 }
 
+void write_client(int epoll_fd, struct epoll_event *event, char *buffer, size_t len)
+{
+    // 需要处理
+}
+
 void wait(int epoll_fd, int socket)
 {
-    struct epoll_event *events;
-    int error = init_events(&events);
-    if (error < 0) {
+    
+    struct epoll_event *events = init_events();
+    if (NULL == events) {
         return;
     }
     while (1) {
@@ -178,11 +178,12 @@ void wait(int epoll_fd, int socket)
 
             } else if (local_event.events & EPOLLOUT) {
 				write(local_event.data.fd, "Welcome\n", 8);
-				local_event.events = EPOLLIN | EPOLLET;
+				local_event.events = EPOLLIN|EPOLLET;
 				epoll_ctl(epoll_fd, EPOLL_CTL_MOD, local_event.data.fd, &local_event);
             }
         }
     }
+    free(events);
 }
 
 int main(void)
